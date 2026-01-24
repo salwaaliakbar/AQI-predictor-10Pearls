@@ -69,10 +69,10 @@ def handle_missing_values(df):
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     
     # Forward fill for time-series data
-    df[numeric_cols] = df[numeric_cols].fillna(method='ffill')
+    df[numeric_cols] = df[numeric_cols].ffill()
     
     # Backward fill remaining
-    df[numeric_cols] = df[numeric_cols].fillna(method='bfill')
+    df[numeric_cols] = df[numeric_cols].bfill()
     
     # Fill any remaining with median
     for col in numeric_cols:
