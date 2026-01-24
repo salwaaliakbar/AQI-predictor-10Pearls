@@ -48,7 +48,7 @@ jobs:
           python main.py
 
       - name: Upload model artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: trained-models
           path: |
@@ -58,7 +58,7 @@ jobs:
           retention-days: 30
 
       - name: Upload predictions
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: predictions
           path: data/next_3_days_predictions.csv
