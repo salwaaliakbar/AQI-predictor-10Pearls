@@ -8,3 +8,5 @@ python-dotenv
 tensorflow
 xgboost
 keras
+plotly
+streamlit
