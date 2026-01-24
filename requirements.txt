@@ -1,0 +1,10 @@
+pymongo
+requests
+pandas
+numpy
+scikit-learn
+joblib
+python-dotenv
+tensorflow
+xgboost
+keras
