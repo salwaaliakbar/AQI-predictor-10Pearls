@@ -1,5 +1,9 @@
 # AQI Predictor - 10Pearls
 
+[![Live Dashboard](https://img.shields.io/badge/Live%20App-Streamlit-green?logo=streamlit)](https://aqi-predictor-10pearls-fyvgvappmxdmqkwjnakxme6.streamlit.app/)
+
+**Live Dashboard:** [https://aqi-predictor-10pearls-fyvgvappmxdmqkwjnakxme6.streamlit.app/](https://aqi-predictor-10pearls-fyvgvappmxdmqkwjnakxme6.streamlit.app/)
+
 ## Overview
 This project is an end-to-end Air Quality Index (AQI) prediction system for Sukkur, built with Python, MongoDB, and Streamlit. It fetches weather and AQI data, preprocesses and augments it, trains machine learning models, and provides a dashboard for visualization and prediction.
 

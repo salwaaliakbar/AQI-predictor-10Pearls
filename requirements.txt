@@ -10,3 +10,4 @@ xgboost
 keras
 plotly
 streamlit
+matplotlib
