@@ -57,21 +57,21 @@ jobs:
             models/*.json
           retention-days: 30
 
-      - name: Upload predictions
-        uses: actions/upload-artifact@v4
-        with:
-          name: predictions
-          path: data/next_3_days_predictions.csv
-          retention-days: 7
+      # - name: Upload predictions
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: predictions
+      #     path: data/next_3_days_predictions.csv
+      #     retention-days: 7
 
-      - name: Commit and push predictions (optional)
-        if: github.event_name == 'schedule'
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add data/next_3_days_predictions.csv models/model_comparison.csv models/training_results.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "🤖 Auto-update: AQI predictions for $(date +%Y-%m-%d)"
-          git push || echo "No changes to push"
+      # - name: Commit and push predictions (optional)
+      #   if: github.event_name == 'schedule'
+      #   run: |
+      #     git config --local user.email "action@github.com"
+      #     git config --local user.name "GitHub Action"
+      #     git add models/model_comparison.csv models/training_results.json
+      #     git diff --quiet && git diff --staged --quiet || git commit -m "🤖 Auto-update: AQI model artifacts for $(date +%Y-%m-%d)"
+      #     git push || echo "No changes to push"
 
       - name: Send notification on failure
         if: failure()
