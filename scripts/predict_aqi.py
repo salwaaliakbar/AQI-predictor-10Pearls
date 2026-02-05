@@ -95,7 +95,7 @@ def predict_aqi_forecast(db=None):
     logger.info(f"Using model: {model_name} (R² = {best_model_doc['metrics']['r2_test']:.4f})")
     
     # Load model and scaler
-    models_dir = Path(__file__).parent.parent / "models"
+    models_dir = Path("models")
     model_path = models_dir / f"{model_name.lower().replace(' ', '_')}.pkl"
     scaler_path = models_dir / "scaler.pkl"
     
