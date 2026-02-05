@@ -41,6 +41,16 @@ jobs:
           mkdir -p models
           mkdir -p notebooks
 
+      - name: Debug MongoDB URI (masked)
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          if [ -z "$MONGODB_URI" ]; then
+            echo "MONGODB_URI is NOT set!"
+          else
+            echo "MONGODB_URI is set. Length: ${#MONGODB_URI}, First char: ${MONGODB_URI:0:1}, Last char: ${MONGODB_URI: -1}"
+          fi
+
       - name: Run complete pipeline
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
