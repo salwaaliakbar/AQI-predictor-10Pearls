@@ -1,0 +1,103 @@
+name: AQI Predict Hourly
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # every hour
+  workflow_dispatch:
+
+jobs:
+  predict-hourly:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install xgboost pymongo
+
+      - name: Create necessary directories
+        run: |
+          mkdir -p data
+          mkdir -p models
+          mkdir -p notebooks
+
+      - name: Debug MongoDB URI (masked)
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          if [ -z "$MONGODB_URI" ]; then
+            echo "MONGODB_URI is NOT set!"
+          else
+            echo "MONGODB_URI is set. Length: ${#MONGODB_URI}, First char: ${MONGODB_URI:0:1}, Last char: ${MONGODB_URI: -1}"
+          fi
+
+
+      - name: Fetch weather data
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          python scripts/fetch_weather.py
+
+      - name: Fetch AQI data
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          python scripts/fetch_AQI.py
+
+      - name: Preprocess data
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          python scripts/data_preprocessing.py
+
+      - name: Feature engineering
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          python scripts/feature_store.py
+
+      - name: Predict AQI
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          python scripts/predict_aqi.py
+
+      - name: Check predictions
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          python check_predictions.py
+
+      - name: Check weather
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          python check_weather.py
+
+      - name: Upload prediction artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: predictions
+          path: data/
+          retention-days: 7
+
+      - name: Send notification on failure
+        if: failure()
+        run: |
+          echo "Prediction pipeline failed! Check logs for details."
