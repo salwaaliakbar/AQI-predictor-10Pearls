@@ -1,6 +1,9 @@
 """
 Feature Store: Store and manage engineered features in MongoDB
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 import pandas as pd
 import logging
 from datetime import datetime, timezone

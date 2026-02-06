@@ -1,6 +1,9 @@
 """
 Fetch Weather Data for Sukkur from Open-Meteo API (Historical + Current)
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 import os
 import requests
 import logging

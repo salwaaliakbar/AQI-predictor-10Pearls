@@ -1,6 +1,9 @@
 """
 Model Registry: Store and manage trained models in MongoDB
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 import joblib
 import logging
 from datetime import datetime, timezone
