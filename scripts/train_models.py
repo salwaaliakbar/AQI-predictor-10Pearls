@@ -1,6 +1,9 @@
 """
 Train 3 Optimized Models for AQI Prediction: Random Forest, XGBoost, Gradient Boosting
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 import pandas as pd
 import numpy as np
 import logging
@@ -85,21 +88,23 @@ def train_models(db=None):
     # Prepare data
     X, y, feature_names = prepare_training_data(df)
     
-    # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+    # Time-based train-test split
+    split_index = int(len(X) * 0.8)
+    X_train = X.iloc[:split_index]
+    X_test  = X.iloc[split_index:]
+    y_train = y.iloc[:split_index]
+    y_test  = y.iloc[split_index:]
     
-    # Scale features
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+    # # Scale features
+    # scaler = StandardScaler()
+    # X_train_scaled = scaler.fit_transform(X_train)
+    # X_test_scaled = scaler.transform(X_test)
     
     # Save scaler
     models_dir = Path(__file__).parent.parent / "models"
     models_dir.mkdir(exist_ok=True)
-    joblib.dump(scaler, models_dir / "scaler.pkl")
-    logger.info("✅ Scaler saved")
+    # joblib.dump(scaler, models_dir / "scaler.pkl")
+    # logger.info("✅ Scaler saved")
     
     # Initialize Model Registry
     registry = ModelRegistry(db)
@@ -115,17 +120,17 @@ def train_models(db=None):
     
     from sklearn.ensemble import RandomForestRegressor
     rf_model = RandomForestRegressor(
-        n_estimators=200,
-        max_depth=20,
-        min_samples_split=5,
-        min_samples_leaf=2,
+        n_estimators=300,
+        max_depth=12,
+        min_samples_split=10,
+        min_samples_leaf=5,
         random_state=42,
         n_jobs=-1
     )
     
-    rf_model.fit(X_train_scaled, y_train)
-    y_train_pred_rf = rf_model.predict(X_train_scaled)
-    y_test_pred_rf = rf_model.predict(X_test_scaled)
+    rf_model.fit(X_train, y_train)
+    y_train_pred_rf = rf_model.predict(X_train)
+    y_test_pred_rf = rf_model.predict(X_test)
     
     rf_metrics = {
         "r2_train": r2_score(y_train, y_train_pred_rf),
@@ -164,24 +169,30 @@ def train_models(db=None):
     logger.info("=" * 70)
     
     xgb_model = XGBRegressor(
-        n_estimators=300,
-        max_depth=7,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
+        n_estimators=800,
+        max_depth=2,
+        learning_rate=0.02,
+        min_child_weight=10,
+        gamma=0.1,
+        subsample=0.7,
+        colsample_bytree=0.7,
+        reg_alpha=0.3,
+        reg_lambda=2.0,
         random_state=42,
         n_jobs=-1,
-        early_stopping_rounds=50
+        early_stopping_rounds=30,
+        objective="reg:squarederror",
+        eval_metric="rmse",
     )
     
     xgb_model.fit(
-        X_train_scaled, y_train,
-        eval_set=[(X_test_scaled, y_test)],
+        X_train, y_train,
+        eval_set=[(X_test, y_test)],
         verbose=False
     )
     
-    y_train_pred_xgb = xgb_model.predict(X_train_scaled)
-    y_test_pred_xgb = xgb_model.predict(X_test_scaled)
+    y_train_pred_xgb = xgb_model.predict(X_train)
+    y_test_pred_xgb = xgb_model.predict(X_test)
     
     xgb_metrics = {
         "r2_train": r2_score(y_train, y_train_pred_xgb),
@@ -222,17 +233,17 @@ def train_models(db=None):
     from sklearn.ensemble import GradientBoostingRegressor
     
     gb_model = GradientBoostingRegressor(
-        n_estimators=200,
-        max_depth=5,
-        learning_rate=0.1,
-        subsample=0.8,
-        min_samples_split=5,
+        n_estimators=500,
+        max_depth=2,
+        learning_rate=0.03,
+        subsample=0.7,
+        min_samples_leaf=15,
         random_state=42
     )
     
-    gb_model.fit(X_train_scaled, y_train)
-    y_train_pred_gb = gb_model.predict(X_train_scaled)
-    y_test_pred_gb = gb_model.predict(X_test_scaled)
+    gb_model.fit(X_train, y_train)
+    y_train_pred_gb = gb_model.predict(X_train)
+    y_test_pred_gb = gb_model.predict(X_test)
     
     gb_metrics = {
         "r2_train": r2_score(y_train, y_train_pred_gb),
