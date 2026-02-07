@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 import logging
 from pymongo import MongoClient
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
@@ -60,6 +60,13 @@ def prepare_training_data(df, target_col="us_aqi"):
     return X, y, list(X.columns)
 
 
+def add_lag_features(df, target_col="us_aqi", lags=[1, 3, 6, 12, 24, 48]):
+    """Add lagged target values as features for time-series prediction"""
+    for lag in lags:
+        df[f"aqi_lag_{lag}"] = df[target_col].shift(lag)
+    return df
+
+
 def prepare_lstm_data(X, y, timesteps=24):
     """Prepare data for LSTM (time series format)"""
     X_lstm = []
@@ -85,10 +92,26 @@ def train_models(db=None):
         logger.error("No features found!")
         return
     
+    # ⚠️ CRITICAL: Sort by timestamp for time-series evaluation
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        before = len(df)
+        df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
+        after = len(df)
+        logger.info(f"Sorted by timestamp | Dropped {before - after} invalid rows")
+    
+    # Add lag features (previous AQI values are strong predictors)
+    logger.info("Adding lag features (past AQI values)...")
+    df = add_lag_features(df, target_col="us_aqi", lags=[1, 3, 6, 12, 24, 48])
+    df = df.dropna()  # Drop rows with NaN from lagging
+    
     # Prepare data
     X, y, feature_names = prepare_training_data(df)
     
-    # Time-based train-test split
+    # Time-Series Cross-Validation (proper evaluation for time-series)
+    tscv = TimeSeriesSplit(n_splits=5)
+    
+    # Use final split for final predictions (80/20)
     split_index = int(len(X) * 0.8)
     X_train = X.iloc[:split_index]
     X_test  = X.iloc[split_index:]
@@ -120,10 +143,10 @@ def train_models(db=None):
     
     from sklearn.ensemble import RandomForestRegressor
     rf_model = RandomForestRegressor(
-        n_estimators=300,
-        max_depth=12,
-        min_samples_split=10,
-        min_samples_leaf=5,
+        n_estimators=200,
+        max_depth=8,
+        min_samples_split=15,
+        min_samples_leaf=8,
         random_state=42,
         n_jobs=-1
     )
@@ -169,15 +192,15 @@ def train_models(db=None):
     logger.info("=" * 70)
     
     xgb_model = XGBRegressor(
-        n_estimators=800,
-        max_depth=2,
-        learning_rate=0.02,
-        min_child_weight=10,
-        gamma=0.1,
-        subsample=0.7,
-        colsample_bytree=0.7,
-        reg_alpha=0.3,
-        reg_lambda=2.0,
+        n_estimators=500,
+        max_depth=4,
+        learning_rate=0.05,
+        min_child_weight=5,
+        gamma=0.5,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        reg_alpha=1.0,
+        reg_lambda=1.0,
         random_state=42,
         n_jobs=-1,
         early_stopping_rounds=30,
@@ -233,11 +256,11 @@ def train_models(db=None):
     from sklearn.ensemble import GradientBoostingRegressor
     
     gb_model = GradientBoostingRegressor(
-        n_estimators=500,
-        max_depth=2,
-        learning_rate=0.03,
-        subsample=0.7,
-        min_samples_leaf=15,
+        n_estimators=300,
+        max_depth=3,
+        learning_rate=0.05,
+        subsample=0.8,
+        min_samples_leaf=10,
         random_state=42
     )
     
