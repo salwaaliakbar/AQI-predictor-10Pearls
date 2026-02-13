@@ -9,12 +9,10 @@ import numpy as np
 import logging
 from datetime import datetime, timezone
 import os
-from dotenv import load_dotenv
 from pathlib import Path
 import joblib
 from config.db import get_db
 
-load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -31,18 +29,24 @@ def load_forecast_weather(db=None):
         logger.warning("No forecast weather data found!")
         return pd.DataFrame()
     weather_forecast['timestamp'] = pd.to_datetime(weather_forecast['timestamp'])
-    # Filter for current time onwards (next 72 hours)
+    # Filter for current time onwards (next 3 days = 72 hours)
     now = pd.Timestamp.now().tz_localize(None)  # Remove timezone for comparison
     future_data = weather_forecast[weather_forecast['timestamp'] >= now].copy()
-    future_data = future_data.sort_values('timestamp').head(72)  # Next 72 hours
+    future_data = future_data.sort_values('timestamp').head(144)  # Next 6 days (to ensure 3 full days)
     logger.info(f"Loaded {len(future_data)} forecast weather records")
     return future_data
 
 
-def engineer_forecast_features(df):
-    """Apply same feature engineering as training data"""
+def engineer_forecast_features(df, db=None):
+    """Apply same feature engineering as training data, including lag features"""
     if df.empty:
         return df
+    
+    # Get last known AQI value (most recent from historical data)
+    db = db if db is not None else get_db()
+    last_aqi_doc = db["raw_aqi"].find_one({}, sort=[("timestamp", -1)])
+    last_aqi_value = last_aqi_doc["us_aqi"] if last_aqi_doc and "us_aqi" in last_aqi_doc else 50.0
+    logger.info(f"Using last known AQI value for lag features: {last_aqi_value:.1f}")
     
     # Time-based features
     df['hour'] = df['timestamp'].dt.hour
@@ -60,10 +64,19 @@ def engineer_forecast_features(df):
     df['pm2_5_rolling_3h'] = 0  # Default for forecast
     df['temp_rolling_3h'] = df['temp'].rolling(window=3, min_periods=1).mean()
     
+    # Lag features: use last known AQI value (will be the same for all forecast records)
+    # This represents using the most recent AQI as a baseline for all lags
+    df['aqi_lag_1'] = last_aqi_value
+    df['aqi_lag_3'] = last_aqi_value
+    df['aqi_lag_6'] = last_aqi_value
+    df['aqi_lag_12'] = last_aqi_value
+    df['aqi_lag_24'] = last_aqi_value
+    df['aqi_lag_48'] = last_aqi_value
+    
     # Fill missing values
     df = df.ffill().bfill().fillna(0)
     
-    logger.info(f"Engineered features for {len(df)} forecast records")
+    logger.info(f"Engineered features for {len(df)} forecast records (including lag features)")
     return df
 
 
@@ -81,7 +94,7 @@ def predict_aqi_forecast(db=None):
         return
     
     # Engineer features
-    forecast_df = engineer_forecast_features(forecast_weather)
+    forecast_df = engineer_forecast_features(forecast_weather, db=db)
     
     # Load model registry to get feature names
     models = list(db["model_registry"].find({}, {"_id": 0}))
@@ -97,17 +110,17 @@ def predict_aqi_forecast(db=None):
     
     logger.info(f"Using model: {model_name} (R² = {best_model_doc['metrics']['r2_test']:.4f})")
     
-    # Load model and scaler
-    models_dir = Path("models")
-    model_path = models_dir / f"{model_name.lower().replace(' ', '_')}.pkl"
-    scaler_path = models_dir / "scaler.pkl"
-    
-    if not model_path.exists() or not scaler_path.exists():
-        logger.error(f"Model or scaler not found!")
+    # Load model and optional scaler
+    model_path = Path(best_model_doc.get("model_path", ""))
+    if not model_path.exists():
+        logger.error("Model file not found! Retrain or re-register the best model.")
         return
     
     model = joblib.load(model_path)
-    scaler = joblib.load(scaler_path)
+    scaler = None
+    scaler_path = model_path.parent / "scaler.pkl"
+    if scaler_path.exists():
+        scaler = joblib.load(scaler_path)
     
     # Prepare features in correct order
     X_forecast = []
@@ -130,9 +143,9 @@ def predict_aqi_forecast(db=None):
     X_forecast = np.array(X_forecast)
     forecast_subset = forecast_df.loc[valid_rows].copy()
     
-    # Scale and predict
-    X_forecast_scaled = scaler.transform(X_forecast)
-    predictions = model.predict(X_forecast_scaled)
+    # Scale if available, then predict
+    X_input = scaler.transform(X_forecast) if scaler is not None else X_forecast
+    predictions = model.predict(X_input)
     
     # Create predictions dataframe
     forecast_subset['predicted_aqi'] = predictions

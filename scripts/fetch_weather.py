@@ -82,7 +82,7 @@ def fetch_current_weather():
         "current": "temperature_2m,relative_humidity_2m,pressure_msl,wind_speed_10m,cloud_cover",
         "hourly": "temperature_2m,relative_humidity_2m,pressure_msl,wind_speed_10m,cloud_cover",
         "past_hours": 24,  # Include last 24 hours
-        "forecast_hours": 48,  # Include next 48 hours
+        "forecast_hours": 72,  # Include next 72 hours (3 days)
         "timezone": "UTC"
     }
     
