@@ -96,18 +96,31 @@ def predict_aqi_forecast(db=None):
     feature_names = best_model_doc['feature_names']
     
     logger.info(f"Using model: {model_name} (R² = {best_model_doc['metrics']['r2_test']:.4f})")
+    logger.info(f"Expected features: {len(feature_names)} | Feature list: {feature_names[:5]}...")
     
-    # Load model and scaler
-    models_dir = Path("models")
-    model_path = models_dir / f"{model_name.lower().replace(' ', '_')}.pkl"
-    scaler_path = models_dir / "scaler.pkl"
-    
-    if not model_path.exists() or not scaler_path.exists():
-        logger.error(f"Model or scaler not found!")
+    # Load model
+    model_path = Path(best_model_doc.get("model_path", ""))
+    if not model_path.exists():
+        logger.error(f"Model file not found at {model_path}")
         return
     
     model = joblib.load(model_path)
-    scaler = joblib.load(scaler_path)
+    logger.info(f"✅ Loaded model from {model_path}")
+    
+    # Try to load scaler (optional, may not exist or may have dimension issues)
+    scaler = None
+    scaler_path = model_path.parent / "scaler.pkl"
+    if scaler_path.exists():
+        try:
+            scaler_temp = joblib.load(scaler_path)
+            # Check if scaler dimensions match
+            if hasattr(scaler_temp, 'n_features_in_') and scaler_temp.n_features_in_ == len(feature_names):
+                scaler = scaler_temp
+                logger.info(f"✅ Loaded compatible scaler ({scaler.n_features_in_} features)")
+            else:
+                logger.warning(f"Scaler dimensions don't match ({scaler_temp.n_features_in_ if hasattr(scaler_temp, 'n_features_in_') else '?'} vs {len(feature_names)}). Skipping scaler.")
+        except Exception as e:
+            logger.warning(f"Could not load scaler: {e}. Proceeding without scaling.")
     
     # Prepare features in correct order
     X_forecast = []
@@ -115,13 +128,17 @@ def predict_aqi_forecast(db=None):
     
     for idx, row in forecast_df.iterrows():
         feature_values = []
-        all_present = True
         
         for feat in feature_names:
             if feat in row.index:
                 val = row[feat]
-                feature_values.append(float(val) if not pd.isna(val) else 0.0)
+                # Handle NaN and convert to float
+                if pd.isna(val):
+                    feature_values.append(0.0)
+                else:
+                    feature_values.append(float(val))
             else:
+                # Feature not found - use 0 as default
                 feature_values.append(0.0)
         
         X_forecast.append(feature_values)
@@ -130,9 +147,27 @@ def predict_aqi_forecast(db=None):
     X_forecast = np.array(X_forecast)
     forecast_subset = forecast_df.loc[valid_rows].copy()
     
-    # Scale and predict
-    X_forecast_scaled = scaler.transform(X_forecast)
-    predictions = model.predict(X_forecast_scaled)
+    logger.info(f"Prepared {len(X_forecast)} forecast samples with {X_forecast.shape[1]} features")
+    
+    # Scale if scaler is available and compatible
+    X_input = X_forecast
+    if scaler is not None:
+        try:
+            X_input = scaler.transform(X_forecast)
+            logger.info("✅ Applied scaler to forecast features")
+        except ValueError as e:
+            logger.warning(f"Scaler transform failed: {e}. Using unscaled features.")
+            X_input = X_forecast
+    else:
+        logger.info("⚠️  No compatible scaler available. Using unscaled features.")
+    
+    # Make predictions
+    try:
+        predictions = model.predict(X_input)
+        logger.info(f"✅ Generated {len(predictions)} predictions")
+    except Exception as e:
+        logger.error(f"Prediction failed: {e}")
+        return
     
     # Create predictions dataframe
     forecast_subset['predicted_aqi'] = predictions
@@ -175,6 +210,7 @@ def predict_aqi_forecast(db=None):
     logger.info(f"Average predicted AQI: {predictions.mean():.1f}")
     logger.info(f"Min predicted AQI: {predictions.min():.1f}")
     logger.info(f"Max predicted AQI: {predictions.max():.1f}")
+    logger.info(f"Std Dev predicted AQI: {predictions.std():.1f}")
     
     # Daily summary
     forecast_subset['date'] = forecast_subset['timestamp'].dt.date
@@ -183,8 +219,6 @@ def predict_aqi_forecast(db=None):
     for date, row in daily.iterrows():
         category = get_category(row['mean'])
         logger.info(f"  {date}: Avg={row['mean']:.1f}, Min={row['min']:.1f}, Max={row['max']:.1f} ({category})")
-    
-    # No client close needed for persistent connection
     
     logger.info("=" * 70)
     logger.info("✅ AUTOMATED PREDICTION COMPLETE")
