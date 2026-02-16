@@ -64,11 +64,22 @@ if len(feature_store) > 24:
     last_24 = feature_store.tail(24)
     actual_aqi = raw_aqi[raw_aqi['timestamp'].isin(last_24['timestamp'])]['us_aqi'].values
     
-    # Load scaler and model
+    # Load scaler (optional) and model
     models_dir = Path(__file__).parent / "models"
-    scaler = joblib.load(models_dir / "scaler.pkl")
-    best_model = models[0]  # Assuming first is best
-    model_path = models_dir / f"{best_model['model_name'].lower().replace(' ', '_')}.pkl"
+    scaler_path = models_dir / "scaler.pkl"
+    scaler = None
+    if scaler_path.exists():
+        try:
+            scaler = joblib.load(scaler_path)
+            print("✅ Loaded scaler")
+        except Exception as e:
+            print(f"⚠️  Could not load scaler: {e}. Using unscaled features.")
+    else:
+        print("⚠️  No scaler found. Using unscaled features.")
+    
+    # Get best model by R2
+    best_model = max(models, key=lambda x: x['metrics']['r2_test'])
+    model_path = Path(best_model['model_path'])
     
     if model_path.exists():
         model = joblib.load(model_path)
@@ -87,8 +98,18 @@ if len(feature_store) > 24:
             X_test.append(features)
         
         X_test = np.array(X_test)
-        X_test_scaled = scaler.transform(X_test)
-        predictions = model.predict(X_test_scaled)
+        
+        # Scale if scaler available
+        X_input = X_test
+        if scaler is not None:
+            try:
+                X_input = scaler.transform(X_test)
+                print("✅ Applied scaler to features")
+            except Exception as e:
+                print(f"⚠️  Scaler transform failed: {e}. Using unscaled features.")
+                X_input = X_test
+        
+        predictions = model.predict(X_input)
         
         # Compare
         print(f"Model: {best_model['model_name']}\n")
