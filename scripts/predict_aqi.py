@@ -56,6 +56,14 @@ def engineer_forecast_features(df):
     df['temp_humidity_interaction'] = df['temp'] * df['humidity']
     df['wind_pressure_interaction'] = df['wind_speed'] * df['pressure']
     
+    # Weather change features (for pattern detection)
+    df['wind_speed_change'] = df['wind_speed'].diff().fillna(0)
+    df['pressure_change'] = df['pressure'].diff().fillna(0)
+    df['temp_change'] = df['temp'].diff().fillna(0)
+    
+    # AQI volatility (6-hour window)
+    df['aqi_volatility'] = 0  # Will be estimated from historical data
+    
     # Rolling features
     df['pm2_5_rolling_3h'] = 0  # Default for forecast
     df['temp_rolling_3h'] = df['temp'].rolling(window=3, min_periods=1).mean()
@@ -82,6 +90,9 @@ def predict_aqi_forecast(db=None):
     
     # Engineer features
     forecast_df = engineer_forecast_features(forecast_weather)
+    
+    logger.info(f"✅ Engineered {len(forecast_df.columns)} weather-based features (NO lag features)")
+    logger.info("Model will predict AQI purely from weather patterns!")
     
     # Load model registry to get feature names
     models = list(db["model_registry"].find({}, {"_id": 0}))

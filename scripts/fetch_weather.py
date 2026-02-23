@@ -25,12 +25,12 @@ DB_NAME = os.getenv("DB_NAME", "aqi_db")
 
 
 def fetch_historical_weather():
-    """Fetch historical weather data (last 30 days) using Open-Meteo"""
+    """Fetch historical weather data (last 90 days) using Open-Meteo"""
     url = "https://archive-api.open-meteo.com/v1/archive"
     
     # Date range: Last 30 days (Open-Meteo requires historical dates)
     end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
     
     params = {
         "latitude": SUKKUR_LAT,

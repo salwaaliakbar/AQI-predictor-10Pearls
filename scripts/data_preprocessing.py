@@ -143,6 +143,24 @@ def augment_data(df):
     if 'wind_speed' in df.columns and 'pressure' in df.columns:
         df['wind_pressure_interaction'] = df['wind_speed'] * df['pressure']
     
+    # Weather change features (impact on AQI)
+    if 'wind_speed' in df.columns:
+        df['wind_speed_change'] = df['wind_speed'].diff().fillna(0)
+        logger.info("✅ Added wind_speed_change feature")
+    
+    if 'pressure' in df.columns:
+        df['pressure_change'] = df['pressure'].diff().fillna(0)
+        logger.info("✅ Added pressure_change feature")
+    
+    if 'temp' in df.columns:
+        df['temp_change'] = df['temp'].diff().fillna(0)
+        logger.info("✅ Added temp_change feature")
+    
+    # AQI volatility (6-hour window)
+    if 'us_aqi' in df.columns:
+        df['aqi_volatility'] = df['us_aqi'].rolling(window=6, min_periods=1).std().fillna(0)
+        logger.info("✅ Added aqi_volatility feature")
+    
     # Rolling averages (3-hour window)
     if 'pm2_5' in df.columns:
         df['pm2_5_rolling_3h'] = df['pm2_5'].rolling(window=3, min_periods=1).mean()

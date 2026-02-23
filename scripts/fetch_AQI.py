@@ -25,13 +25,13 @@ DB_NAME = os.getenv("DB_NAME", "aqi_db")
 
 
 def fetch_historical_aqi():
-    """Fetch historical AQI data (last 30 days) using Open-Meteo Air Quality API"""
+    """Fetch historical AQI data (last 90 days) using Open-Meteo Air Quality API"""
     # Air quality endpoint returns pollutant concentrations; supports start/end date
     url = "https://air-quality-api.open-meteo.com/v1/air-quality"
     
     # Date range: Last 30 days
     end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
     
     params = {
         "latitude": SUKKUR_LAT,

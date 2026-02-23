@@ -100,12 +100,8 @@ def train_models(db=None):
         after = len(df)
         logger.info(f"Sorted by timestamp | Dropped {before - after} invalid rows")
     
-    # Add lag features (previous AQI values are strong predictors)
-    logger.info("Adding lag features (past AQI values)...")
-    df = add_lag_features(df, target_col="us_aqi", lags=[1, 3, 6, 12, 24, 48])
-    df = df.dropna()  # Drop rows with NaN from lagging
-    
-    # Prepare data
+    # Prepare data WITHOUT lag features (pure weather-based prediction)
+    # Model learns from weather patterns directly, not past AQI values
     X, y, feature_names = prepare_training_data(df)
     
     # Time-Series Cross-Validation (proper evaluation for time-series)
@@ -194,13 +190,13 @@ def train_models(db=None):
     xgb_model = XGBRegressor(
         n_estimators=500,
         max_depth=4,
-        learning_rate=0.05,
+        learning_rate=0.1,
         min_child_weight=5,
         gamma=0.5,
         subsample=0.8,
         colsample_bytree=0.8,
-        reg_alpha=1.0,
-        reg_lambda=1.0,
+        reg_alpha=0.5,
+        reg_lambda=0.5,
         random_state=42,
         n_jobs=-1,
         early_stopping_rounds=30,
@@ -311,10 +307,12 @@ def train_models(db=None):
     
     # Get best model
     best_model_doc = registry.get_best_model()
-    logger.info(f"\n🏆 Best Model: {best_model_doc['model_name']}")
-    logger.info(f"   R² Score: {best_model_doc['metrics']['r2_test']:.4f}")
+    logger.info(f"\n🏆 BEST MODEL (Highest R² Test Score):")
+    logger.info(f"   Model Name: {best_model_doc['model_name']}")
+    logger.info(f"   ✅ R² Score: {best_model_doc['metrics']['r2_test']:.4f}")
     logger.info(f"   MAE: {best_model_doc['metrics']['mae_test']:.4f}")
     logger.info(f"   RMSE: {best_model_doc['metrics']['rmse_test']:.4f}")
+    logger.info(f"   (Compare with results table above)")
     
     registry.close()
     
