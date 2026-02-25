@@ -18,6 +18,8 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+LAG_STEPS = [1, 3, 6, 12, 24]
+
 
 def load_forecast_weather(db=None):
     """Load forecast weather data (current + next 3 days)"""
@@ -36,6 +38,24 @@ def load_forecast_weather(db=None):
     future_data = weather_forecast[weather_forecast['timestamp'] >= now].copy()
     future_data = future_data.sort_values('timestamp').head(72)  # Next 72 hours
     logger.info(f"Loaded {len(future_data)} forecast weather records")
+    return future_data
+
+
+def load_forecast_aqi(db=None):
+    """Load forecast AQI data (current + next 3 days)"""
+    db = db if db is not None else get_db()
+    aqi_forecast = pd.DataFrame(list(db["raw_aqi"].find(
+        {"source": "open-meteo-forecast"},
+        {"_id": 0}
+    )))
+    if aqi_forecast.empty:
+        logger.warning("No forecast AQI data found!")
+        return pd.DataFrame()
+    aqi_forecast['timestamp'] = pd.to_datetime(aqi_forecast['timestamp'])
+    now = pd.Timestamp.now().tz_localize(None)
+    future_data = aqi_forecast[aqi_forecast['timestamp'] >= now].copy()
+    future_data = future_data.sort_values('timestamp').head(72)
+    logger.info(f"Loaded {len(future_data)} forecast AQI records")
     return future_data
 
 
@@ -61,11 +81,7 @@ def engineer_forecast_features(df):
     df['pressure_change'] = df['pressure'].diff().fillna(0)
     df['temp_change'] = df['temp'].diff().fillna(0)
     
-    # AQI volatility (6-hour window)
-    df['aqi_volatility'] = 0  # Will be estimated from historical data
-    
     # Rolling features
-    df['pm2_5_rolling_3h'] = 0  # Default for forecast
     df['temp_rolling_3h'] = df['temp'].rolling(window=3, min_periods=1).mean()
     
     # Fill missing values
@@ -73,6 +89,23 @@ def engineer_forecast_features(df):
     
     logger.info(f"Engineered features for {len(df)} forecast records")
     return df
+
+
+def load_recent_aqi_history(db=None, hours=48):
+    """Load recent AQI history for lag features"""
+    db = db if db is not None else get_db()
+    df = pd.DataFrame(list(db["preprocessed_data"].find({}, {"_id": 0, "timestamp": 1, "us_aqi": 1})))
+    if df.empty:
+        logger.warning("No historical AQI data found for lag features")
+        return []
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df = df.dropna(subset=["timestamp", "us_aqi"]).sort_values("timestamp")
+    if df.empty:
+        logger.warning("No valid AQI history after cleanup")
+        return []
+    history = df.tail(hours)["us_aqi"].astype(float).tolist()
+    logger.info(f"Loaded {len(history)} AQI history points for lag features")
+    return history
 
 
 def predict_aqi_forecast(db=None):
@@ -87,12 +120,30 @@ def predict_aqi_forecast(db=None):
     if forecast_weather.empty:
         logger.error("No forecast data available for predictions!")
         return
+
+    # Load forecast AQI data (pollutants)
+    forecast_aqi = load_forecast_aqi(db)
+    if forecast_aqi.empty:
+        logger.error("No forecast AQI data available for predictions!")
+        return
+
+    # Merge weather and AQI forecast data
+    forecast_df = pd.merge(
+        forecast_weather,
+        forecast_aqi,
+        on=['city', 'timestamp'],
+        how='inner',
+        suffixes=('_weather', '_aqi')
+    )
+    if forecast_df.empty:
+        logger.error("No merged forecast data available after join!")
+        return
     
     # Engineer features
-    forecast_df = engineer_forecast_features(forecast_weather)
+    forecast_df = engineer_forecast_features(forecast_df)
     
-    logger.info(f"✅ Engineered {len(forecast_df.columns)} weather-based features (NO lag features)")
-    logger.info("Model will predict AQI purely from weather patterns!")
+    logger.info(f"✅ Engineered {len(forecast_df.columns)} forecast features")
+    logger.info("Model will predict AQI using weather, pollutants, and lag features when available")
     
     # Load model registry to get feature names
     models = list(db["model_registry"].find({}, {"_id": 0}))
@@ -133,52 +184,55 @@ def predict_aqi_forecast(db=None):
         except Exception as e:
             logger.warning(f"Could not load scaler: {e}. Proceeding without scaling.")
     
-    # Prepare features in correct order
-    X_forecast = []
+    # Load AQI history for lag features
+    aqi_history = load_recent_aqi_history(db=db, hours=max(LAG_STEPS) + 24)
+    history_mean = float(np.mean(aqi_history)) if aqi_history else 0.0
+
+    # Prepare features in correct order (recursive for lag features)
+    predictions = []
     valid_rows = []
-    
+
+    if scaler is None:
+        logger.info("⚠️  No compatible scaler available. Using unscaled features.")
+
     for idx, row in forecast_df.iterrows():
+        lag_values = {}
+        for lag in LAG_STEPS:
+            if len(aqi_history) >= lag:
+                lag_values[f"aqi_lag_{lag}"] = float(aqi_history[-lag])
+            else:
+                lag_values[f"aqi_lag_{lag}"] = history_mean
+
         feature_values = []
-        
         for feat in feature_names:
             if feat in row.index:
                 val = row[feat]
-                # Handle NaN and convert to float
-                if pd.isna(val):
-                    feature_values.append(0.0)
-                else:
-                    feature_values.append(float(val))
+                feature_values.append(float(val) if not pd.isna(val) else 0.0)
+            elif feat in lag_values:
+                feature_values.append(lag_values[feat])
             else:
-                # Feature not found - use 0 as default
                 feature_values.append(0.0)
-        
-        X_forecast.append(feature_values)
-        valid_rows.append(idx)
-    
-    X_forecast = np.array(X_forecast)
-    forecast_subset = forecast_df.loc[valid_rows].copy()
-    
-    logger.info(f"Prepared {len(X_forecast)} forecast samples with {X_forecast.shape[1]} features")
-    
-    # Scale if scaler is available and compatible
-    X_input = X_forecast
-    if scaler is not None:
+
+        X_row = pd.DataFrame([feature_values], columns=feature_names)
+        if scaler is not None:
+            try:
+                X_row = scaler.transform(X_row)
+            except ValueError as e:
+                logger.warning(f"Scaler transform failed: {e}. Using unscaled features.")
+
         try:
-            X_input = scaler.transform(X_forecast)
-            logger.info("✅ Applied scaler to forecast features")
-        except ValueError as e:
-            logger.warning(f"Scaler transform failed: {e}. Using unscaled features.")
-            X_input = X_forecast
-    else:
-        logger.info("⚠️  No compatible scaler available. Using unscaled features.")
-    
-    # Make predictions
-    try:
-        predictions = model.predict(X_input)
-        logger.info(f"✅ Generated {len(predictions)} predictions")
-    except Exception as e:
-        logger.error(f"Prediction failed: {e}")
-        return
+            pred = float(model.predict(X_row)[0])
+        except Exception as e:
+            logger.error(f"Prediction failed at {idx}: {e}")
+            return
+
+        predictions.append(pred)
+        aqi_history.append(pred)
+        valid_rows.append(idx)
+
+    forecast_subset = forecast_df.loc[valid_rows].copy()
+    predictions = np.array(predictions, dtype=float)
+    logger.info(f"Prepared {len(predictions)} forecast samples with {len(feature_names)} features")
     
     # Create predictions dataframe
     forecast_subset['predicted_aqi'] = predictions

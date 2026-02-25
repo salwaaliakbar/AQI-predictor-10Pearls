@@ -4,6 +4,7 @@ Orchestrates: Data Fetching → Preprocessing → Feature Engineering → Model 
 """
 
 
+import utils.session
 import sys
 import logging
 from pathlib import Path
