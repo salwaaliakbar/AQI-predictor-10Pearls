@@ -112,3 +112,7 @@ def engineer_and_store_features(db=None):
     logger.info("FEATURE ENGINEERING COMPLETE")
     logger.info("=" * 70)
     return feature_store.get_features()
+
+
+if __name__ == "__main__":
+    engineer_and_store_features()

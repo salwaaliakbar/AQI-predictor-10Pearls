@@ -76,9 +76,57 @@ def fetch_historical_aqi():
     return aqi_records
 
 
+def fetch_forecast_aqi():
+    """Fetch forecast AQI data (next 72 hours) using Open-Meteo Air Quality API"""
+    url = "https://air-quality-api.open-meteo.com/v1/air-quality"
+
+    params = {
+        "latitude": SUKKUR_LAT,
+        "longitude": SUKKUR_LON,
+        "forecast_days": 3,
+        "hourly": "pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,us_aqi,european_aqi",
+        "timezone": "UTC"
+    }
+
+    logger.info(f"Fetching forecast AQI data for {CITY} (next 72 hours)...")
+    response = requests.get(url, params=params, timeout=60)
+    response.raise_for_status()
+
+    data = response.json()
+    hourly = data.get("hourly", {})
+    times = hourly.get("time", [])
+
+    aqi_records = []
+    for i, time_str in enumerate(times):
+        timestamp = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+
+        record = {
+            "city": CITY,
+            "lat": SUKKUR_LAT,
+            "lon": SUKKUR_LON,
+            "timestamp": timestamp,
+            "pm10": hourly.get("pm10", [])[i] if i < len(hourly.get("pm10", [])) else None,
+            "pm2_5": hourly.get("pm2_5", [])[i] if i < len(hourly.get("pm2_5", [])) else None,
+            "carbon_monoxide": hourly.get("carbon_monoxide", [])[i] if i < len(hourly.get("carbon_monoxide", [])) else None,
+            "nitrogen_dioxide": hourly.get("nitrogen_dioxide", [])[i] if i < len(hourly.get("nitrogen_dioxide", [])) else None,
+            "sulphur_dioxide": hourly.get("sulphur_dioxide", [])[i] if i < len(hourly.get("sulphur_dioxide", [])) else None,
+            "ozone": hourly.get("ozone", [])[i] if i < len(hourly.get("ozone", [])) else None,
+            "us_aqi": hourly.get("us_aqi", [])[i] if i < len(hourly.get("us_aqi", [])) else None,
+            "european_aqi": hourly.get("european_aqi", [])[i] if i < len(hourly.get("european_aqi", [])) else None,
+            "source": "open-meteo-forecast",
+            "fetched_at": datetime.now(timezone.utc)
+        }
+        aqi_records.append(record)
+
+    logger.info(f"✅ Fetched {len(aqi_records)} forecast AQI records")
+    return aqi_records
+
+
 def fetch_aqi_data():
     """Fetch AQI data (historical + current)"""
-    return fetch_historical_aqi()
+    historical = fetch_historical_aqi()
+    forecast = fetch_forecast_aqi()
+    return historical + forecast
 
 
 def store_aqi_data(records, db=None):
