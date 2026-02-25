@@ -40,7 +40,8 @@ def merge_data(weather_df, aqi_df):
         how='inner',
         suffixes=('_weather', '_aqi')
     )
-    
+
+    merged = merged.sort_values('timestamp')
     logger.info(f"Merged data: {len(merged)} records")
     return merged
 
@@ -64,23 +65,25 @@ def compute_us_aqi_from_pm25(pm25):
     return np.nan
 
 
-def handle_missing_values(df):
+def handle_missing_values(df, exclude_cols=None):
     """Handle missing values using various strategies"""
     logger.info("Handling missing values...")
-    
-    # Numeric columns
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    
+
+    exclude_cols = set(exclude_cols or [])
+
+    # Numeric columns (excluding target to avoid leakage)
+    numeric_cols = [
+        col for col in df.select_dtypes(include=[np.number]).columns
+        if col not in exclude_cols
+    ]
+
     # Forward fill for time-series data
     df[numeric_cols] = df[numeric_cols].ffill()
-    
-    # Backward fill remaining
-    df[numeric_cols] = df[numeric_cols].bfill()
-    
+
     # Fill any remaining with median
     for col in numeric_cols:
         if df[col].isna().any():
-            df[col].fillna(df[col].median(), inplace=True)
+            df[col] = df[col].fillna(df[col].median())
     
     # Remove rows with too many missing values (>50%)
     threshold = len(df.columns) * 0.5
@@ -156,19 +159,25 @@ def augment_data(df):
         df['temp_change'] = df['temp'].diff().fillna(0)
         logger.info("✅ Added temp_change feature")
     
-    # AQI volatility (6-hour window)
-    if 'us_aqi' in df.columns:
-        df['aqi_volatility'] = df['us_aqi'].rolling(window=6, min_periods=1).std().fillna(0)
-        logger.info("✅ Added aqi_volatility feature")
-    
     # Rolling averages (3-hour window)
-    if 'pm2_5' in df.columns:
-        df['pm2_5_rolling_3h'] = df['pm2_5'].rolling(window=3, min_periods=1).mean()
-    
     if 'temp' in df.columns:
         df['temp_rolling_3h'] = df['temp'].rolling(window=3, min_periods=1).mean()
     
     logger.info(f"✅ Data augmented with {df.shape[1]} features")
+    return df
+
+
+def add_aqi_lag_features(df, target_col="us_aqi", lags=None):
+    """Add lagged AQI values for short-term forecasting"""
+    lags = lags or [1, 3, 6, 12, 24]
+    if target_col not in df.columns:
+        logger.warning(f"Target column {target_col} not found. Skipping lag features.")
+        return df
+
+    df = df.sort_values("timestamp")
+    for lag in lags:
+        df[f"aqi_lag_{lag}"] = df[target_col].shift(lag)
+    logger.info(f"✅ Added lag features: {lags}")
     return df
 
 
@@ -190,7 +199,7 @@ def preprocess_data(db=None):
         logger.info("Filled missing us_aqi using PM2.5-based approximation")
     
     # Handle missing values
-    df = handle_missing_values(df)
+    df = handle_missing_values(df, exclude_cols=["us_aqi"])
     
     # Remove outliers from key columns
     outlier_cols = ['pm2_5', 'pm10', 'temp', 'humidity', 'pressure', 'wind_speed']
@@ -198,6 +207,16 @@ def preprocess_data(db=None):
     
     # Augment with additional features
     df = augment_data(df)
+
+    # Add AQI lag features for short-term forecasting
+    df = add_aqi_lag_features(df)
+
+    # Drop rows with incomplete lag history
+    lag_cols = [col for col in df.columns if col.startswith("aqi_lag_")]
+    if lag_cols:
+        before = len(df)
+        df = df.dropna(subset=lag_cols)
+        logger.info(f"Dropped {before - len(df)} rows without full lag history")
     
     # Store preprocessed data using MongoDBConnection
     db = db if db is not None else get_db()

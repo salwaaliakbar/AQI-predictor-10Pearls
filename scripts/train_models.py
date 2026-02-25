@@ -29,6 +29,38 @@ from sklearn.ensemble import RandomForestRegressor
 
 logger.info("✅ All ML libraries loaded: Random Forest, XGBoost")
 
+# Keep training features aligned with forecast features
+MODEL_FEATURES = [
+    "temp",
+    "humidity",
+    "pressure",
+    "wind_speed",
+    "clouds",
+    "pm2_5",
+    "pm10",
+    "carbon_monoxide",
+    "nitrogen_dioxide",
+    "sulphur_dioxide",
+    "ozone",
+    "hour",
+    "day",
+    "month",
+    "day_of_week",
+    "is_weekend",
+    "is_rush_hour",
+    "temp_humidity_interaction",
+    "wind_pressure_interaction",
+    "wind_speed_change",
+    "pressure_change",
+    "temp_change",
+    "temp_rolling_3h",
+    "aqi_lag_1",
+    "aqi_lag_3",
+    "aqi_lag_6",
+    "aqi_lag_12",
+    "aqi_lag_24",
+]
+
 
 def load_features(db=None):
     """Load features from Feature Store"""
@@ -40,23 +72,28 @@ def load_features(db=None):
 
 def prepare_training_data(df, target_col="us_aqi"):
     """Prepare features and target for training"""
-    exclude_cols = ['timestamp', 'city', 'lat', 'lon', 'fetched_at', 
-                   'weather_main', 'weather_description', 'source_weather', 'source_aqi',
-                   target_col, 'pm2_5', 'pm10', 'european_aqi']
-    
-    feature_cols = [col for col in df.columns if col not in exclude_cols]
-    
     df = df.dropna(subset=[target_col])
-    
-    X = df[feature_cols].select_dtypes(include=[np.number])
+
+    available = [col for col in MODEL_FEATURES if col in df.columns]
+    missing = [col for col in MODEL_FEATURES if col not in df.columns]
+    if missing:
+        logger.warning(f"Missing expected features (will skip): {missing}")
+
+    lag_cols = [col for col in available if col.startswith("aqi_lag_")]
+    if lag_cols:
+        before = len(df)
+        df = df.dropna(subset=lag_cols)
+        logger.info(f"Dropped {before - len(df)} rows with missing lag features")
+
+    X = df[available].select_dtypes(include=[np.number])
     y = df[target_col]
-    
+
     # Fill any remaining NaN in features
     X = X.fillna(X.median())
-    
+
     logger.info(f"Features: {X.shape[1]}, Samples: {len(X)}")
     logger.info(f"Feature names: {list(X.columns)[:10]}...")
-    
+
     return X, y, list(X.columns)
 
 
